@@ -28,6 +28,7 @@ module order_manager #(
     input  wire [VOLUME_WIDTH-1:0]  order_volume,
     input  wire                     order_side,        // 0=buy, 1=sell
     input  wire [2:0]               order_type,        // 0=market, 1=limit, 2=cancel
+    input  wire [31:0]              order_id,           // Order ID input
     output wire                     order_ready,
     
     // Market data interface
@@ -62,7 +63,12 @@ module order_manager #(
     output wire [31:0]              orders_processed,
     output wire [31:0]              orders_filled,
     output wire [31:0]              orders_rejected,
-    output wire [15:0]              active_orders
+    output wire [15:0]              active_orders,
+    
+    // Additional outputs
+    output wire [31:0]              risk_code,          // Risk code output
+    output wire [31:0]              execution_status,   // Execution status output
+    output wire [31:0]              position_pnl       // Position PnL output
 );
 
 // Internal registers
@@ -133,7 +139,23 @@ assign active_orders = active_order_count;
 assign order_ready = (order_state == ORDER_IDLE) || (order_state == ORDER_COMPLETE);
 
 // Risk violation output
-assign risk_violation = risk_enabled && !risk_all_ok && (order_state == ORDER_RISK_CHECK);
+assign risk_violation = risk_violation_sticky;
+
+// Risk code logic
+assign risk_code = !risk_position_ok ? 32'd1 :
+                   !risk_size_ok     ? 32'd2 : 32'd0;
+
+// Execution status logic
+assign execution_status = (order_state == ORDER_EXECUTE) ? 32'd1 :
+                         (order_state == ORDER_REJECT)  ? 32'd2 : 32'd0;
+
+// Position PnL logic (placeholder)
+assign position_pnl = 32'd0;
+
+// Sticky signals for testbench visibility
+reg exec_valid_sticky;
+reg pos_update_valid_sticky;
+reg risk_violation_sticky;
 
 // Main state machine
 always @(posedge clk or negedge rst_n) begin
@@ -150,6 +172,9 @@ always @(posedge clk or negedge rst_n) begin
         
         exec_valid <= 1'b0;
         pos_update_valid <= 1'b0;
+        exec_valid_sticky <= 1'b0;
+        pos_update_valid_sticky <= 1'b0;
+        risk_violation_sticky <= 1'b0;
         
         // Initialize order memory
         for (i = 0; i < MAX_ORDERS; i = i + 1) begin
@@ -165,7 +190,7 @@ always @(posedge clk or negedge rst_n) begin
                 
                 if (order_valid) begin
                     // Capture new order
-                    current_order <= order_data;
+                    current_order <= {32'b0, order_id};
                     current_symbol <= order_symbol;
                     current_price <= order_price;
                     current_volume <= order_volume;

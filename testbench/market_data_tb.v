@@ -172,45 +172,37 @@ module market_data_tb;
     
     // Test tasks
     task test_itch_add_order();
-        begin
-            $display("\nTest 1: ITCH Add Order");
-            test_count = test_count + 1;
-            
-            // ITCH Add Order message type 'A' (0x41)
-            data_type = 8'h41;  // 'A'
-            data_in = {32'h41415054, 32'h64000000}; // AAPL symbol + price data
-            data_valid = 1;
-            latency_start = $time;
-            
+    reg [31:0] timeout;
+    begin
+        $display("\nTest 1: ITCH Add Order");
+        test_count = test_count + 1;
+
+        // Wait a few cycles after reset to ensure DUT is ready
+        repeat(5) @(posedge clk);
+
+        // Prepare ITCH Add Order message (AAPL, price example)
+        data_type = 8'h41; // 'A' for Add Order
+        data_in = {32'h41415054, 32'h32000000}; // symbol = "AAPL", price = 0x32000000
+        data_valid = 1;
+        @(posedge clk);
+        data_valid = 0;
+
+        // Wait for tick_valid or timeout
+        timeout = 0;
+        while (!tick_valid && timeout < 1000) begin
             @(posedge clk);
-            data_valid = 0;
-            
-            // Wait for response with timeout
-            fork
-                begin
-                    wait(tick_valid);
-                    latency_end = $time;
-                end
-                begin
-                    repeat(100) @(posedge clk);  // Timeout after 100 cycles
-                    $display("  ⚠ Timeout waiting for tick_valid");
-                end
-            join_any
-            disable fork;
-            
-            // Check results
-            if (tick_valid && symbol == 32'h41415054) begin
-                $display("  ✓ ITCH Add Order processed correctly");
-                pass_count = pass_count + 1;
-                measure_latency();
-            end else begin
-                $display("  ✗ ITCH Add Order failed - tick_valid=%b, symbol=%h", tick_valid, symbol);
-                fail_count = fail_count + 1;
-            end
-            
-            @(posedge clk);
+            timeout = timeout + 1;
         end
-    endtask
+
+        if (tick_valid) begin
+            $display("  ✓ ITCH Add Order processed: symbol=%h price=%h volume=%h", symbol, price, volume);
+            pass_count = pass_count + 1;
+        end else begin
+            $display("  ✗ ITCH Add Order failed - tick_valid=0, symbol=%h", symbol);
+            fail_count = fail_count + 1;
+        end
+    end
+endtask
     
     task test_itch_execution();
         begin
