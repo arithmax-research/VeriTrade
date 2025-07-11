@@ -71,6 +71,9 @@ reg [31:0] fill_counter;
 reg [31:0] reject_counter;
 reg [15:0] active_order_count;
 
+// Loop variable for initialization
+integer i;
+
 // Order state machine
 localparam ORDER_IDLE = 3'b000;
 localparam ORDER_VALIDATE = 3'b001;
@@ -149,7 +152,6 @@ always @(posedge clk or negedge rst_n) begin
         pos_update_valid <= 1'b0;
         
         // Initialize order memory
-        integer i;
         for (i = 0; i < MAX_ORDERS; i = i + 1) begin
             order_valid_flags[i] <= 1'b0;
         end

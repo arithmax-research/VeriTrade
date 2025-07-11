@@ -269,7 +269,7 @@ module order_manager_tb;
             order_price = 32'h96000000;
             order_volume = 32'hFFFFFFFF;  // Very large volume
             order_type = 8'h01;
-            order_id = 32'hRISK0001;
+            order_id = 32'h12345001;
             order_valid = 1;
             
             @(posedge clk);
