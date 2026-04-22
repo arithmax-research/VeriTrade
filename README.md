@@ -368,7 +368,7 @@ make binance-refresh-input
 
 ## Live Trading Visualization
 
-For a rolling view of Binance market data plus either a synthetic strategy or the HDL-backed HJB backend, use the live dashboard.
+For a rolling view of Binance market data plus either a synthetic strategy or the HDL-backed HJB backend, use the `Frankline Arithmax FPGA VHDL + C++ Ultra Low Latency MM` dashboard.
 
 ### Live Binance feed
 

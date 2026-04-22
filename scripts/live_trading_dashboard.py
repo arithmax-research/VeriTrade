@@ -329,11 +329,19 @@ class HJBEngine:
 
 
 class Dashboard:
-    def __init__(self, title: str, max_points: int, max_orders: int, backend: str) -> None:
+    def __init__(
+        self,
+        title: str,
+        max_points: int,
+        max_orders: int,
+        backend: str,
+        quote_max_deviation_pct: float,
+    ) -> None:
         self.title = title
         self.max_points = max_points
         self.max_orders = max_orders
         self.backend = backend
+        self.quote_max_deviation_pct = max(0.01, quote_max_deviation_pct)
 
         self.times: Deque[float] = deque(maxlen=max_points)
         self.mids: Deque[float] = deque(maxlen=max_points)
@@ -377,8 +385,11 @@ class Dashboard:
             figsize=(13, 8),
             gridspec_kw={"height_ratios": [3, 1]},
         )
+        self.fig.patch.set_facecolor("#0b1220")
+        self.ax_price.set_facecolor("#111827")
+        self.ax_latency.set_facecolor("#111827")
         self.fig.canvas.manager.set_window_title(self.title)
-        self.fig.suptitle(self.title, fontsize=16, fontweight="bold")
+        self.fig.suptitle(self.title, fontsize=17, fontweight="bold", color="#f8fafc")
 
         self.price_line, = self.ax_price.plot([], [], label="Mid", color="#00bcd4", linewidth=1.8)
         self.bid_line, = self.ax_price.plot([], [], label="Bid", color="#4caf50", linewidth=1.0, alpha=0.8)
@@ -396,21 +407,23 @@ class Dashboard:
             ha="left",
             fontsize=10,
             family="monospace",
-            bbox={"facecolor": "black", "alpha": 0.55, "pad": 6, "edgecolor": "none"},
-            color="white",
+            bbox={"facecolor": "#000000", "alpha": 0.60, "pad": 7, "edgecolor": "#374151"},
+            color="#f9fafb",
         )
 
-        self.ax_price.set_ylabel("Price")
+        self.ax_price.set_ylabel("Price", color="#e5e7eb")
         self.ax_price.grid(True, alpha=0.25)
         self.ax_price.legend(loc="upper right")
 
         self.source_lag_line, = self.ax_latency.plot([], [], label="Source lag", color="#3498db", linewidth=1.4)
         self.dashboard_lag_line, = self.ax_latency.plot([], [], label="Dashboard lag", color="#9b59b6", linewidth=1.2)
         self.exec_latency_line, = self.ax_latency.plot([], [], label="Exec latency", color="#e67e22", linewidth=1.2)
-        self.ax_latency.set_ylabel("Lag / latency (us)")
-        self.ax_latency.set_xlabel("Recent samples")
+        self.ax_latency.set_ylabel("Lag / latency (us)", color="#e5e7eb")
+        self.ax_latency.set_xlabel("Recent samples", color="#e5e7eb")
         self.ax_latency.grid(True, axis="y", alpha=0.25)
         self.ax_latency.legend(loc="upper right")
+        self.ax_price.tick_params(colors="#d1d5db")
+        self.ax_latency.tick_params(colors="#d1d5db")
 
     def push_tick(self, tick: MarketTick) -> None:
         self.times.append(tick.ts)
@@ -470,7 +483,14 @@ class Dashboard:
         self.exec_scatter = self.ax_price.scatter(exec_x, exec_y, s=60, marker="o", c=exec_colors, edgecolors="white", linewidths=0.5, label="Executions")
 
         self.ax_price.relim()
-        self.ax_price.autoscale_view()
+        market_values = list(self.mids) + list(self.bids) + list(self.asks)
+        if market_values:
+            low = min(market_values)
+            high = max(market_values)
+            span = max(high - low, max(high * 0.002, 0.01))
+            self.ax_price.set_ylim(low - span * 0.15, high + span * 0.15)
+        if len(x) > 1:
+            self.ax_price.set_xlim(min(x), max(x))
 
         self.ax_latency.clear()
         source_values = list(self.source_lags_us)
@@ -520,6 +540,8 @@ class Dashboard:
         self.status_text.set_text("\n".join(stats))
 
     def push_quote(self, quote_event: QuoteEvent) -> None:
+        if not self._quote_is_sane(quote_event):
+            return
         self.quote_times.append(quote_event.sim_end_ts)
         self.quote_bids.append(quote_event.bid)
         self.quote_asks.append(quote_event.ask)
@@ -528,6 +550,15 @@ class Dashboard:
         self.last_symbol = f"Q{quote_event.quote_id}"
         self.last_source = "hjb-rtl"
         self.last_event_wall = time.time()
+
+    def _quote_is_sane(self, quote_event: QuoteEvent) -> bool:
+        if quote_event.mid <= 0:
+            return False
+        if quote_event.bid <= 0 or quote_event.ask <= 0:
+            return False
+        bid_dev = abs((quote_event.bid - quote_event.mid) / quote_event.mid)
+        ask_dev = abs((quote_event.ask - quote_event.mid) / quote_event.mid)
+        return bid_dev <= self.quote_max_deviation_pct and ask_dev <= self.quote_max_deviation_pct
 
     def set_telemetry(
         self,
@@ -780,6 +811,12 @@ def main() -> int:
     parser.add_argument("--window", type=int, default=240, help="Rolling point window for chart history")
     parser.add_argument("--max-orders", type=int, default=80, help="Number of recent orders/executions to show")
     parser.add_argument(
+        "--quote-max-deviation-pct",
+        type=float,
+        default=0.25,
+        help="Hide HJB quote lines when quote deviates too far from market mid",
+    )
+    parser.add_argument(
         "--hjb-fill-model",
         choices=["strict", "simulated"],
         default="simulated",
@@ -800,10 +837,11 @@ def main() -> int:
 
     pump = EventPump()
     dashboard = Dashboard(
-        title="Ultra Low Latency Trading Visualization",
+        title="Frankline Arithmax FPGA VHDL + C++ Ultra Low Latency MM",
         max_points=args.window,
         max_orders=args.max_orders,
         backend=args.backend,
+        quote_max_deviation_pct=args.quote_max_deviation_pct,
     )
     logger = EventLogger(Path(args.event_log) if args.event_log else None)
     strategy = StrategySim(latency_us=args.latency_us, spread_threshold_bps=args.spread_threshold_bps, window=args.window)
