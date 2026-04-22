@@ -283,6 +283,48 @@ install-deps:
 	fi
 	@echo "Dependencies installation completed"
 
+# Binance market data pipeline for HJB input generation
+.PHONY: binance-capture
+binance-capture:
+	@echo "Capturing Binance WebSocket data..."
+	python3 scripts/capture_binance_ws.py \
+		--symbol btcusdt \
+		--stream bookticker \
+		--output data/binance_capture.ndjson \
+		--max-messages 500
+
+.PHONY: binance-to-input
+binance-to-input:
+	@echo "Converting Binance capture to market_input.txt..."
+	python3 scripts/binance_to_market_input.py \
+		--input data/binance_capture.ndjson \
+		--output market_input.txt \
+		--inventory 0
+
+.PHONY: binance-refresh-input
+binance-refresh-input: binance-capture binance-to-input
+	@echo "market_input.txt refreshed from Binance data"
+
+.PHONY: live-trading-dashboard
+live-trading-dashboard:
+	@echo "Launching live trading dashboard..."
+	python3 scripts/live_trading_dashboard.py --mode live --symbol btcusdt --stream bookticker
+
+.PHONY: replay-trading-dashboard
+replay-trading-dashboard:
+	@echo "Launching replay trading dashboard..."
+	python3 scripts/live_trading_dashboard.py --mode replay --input data/binance_capture.ndjson
+
+.PHONY: live-hjb-dashboard
+live-hjb-dashboard:
+	@echo "Launching live dashboard with HDL HJB backend..."
+	python3 scripts/live_trading_dashboard.py --mode live --backend hjb --symbol btcusdt --stream bookticker
+
+.PHONY: live-trading-dashboard-b
+live-trading-dashboard-b:
+	@echo "Launching kdb/q+ dashboard (Version B)..."
+	q scripts/live_trading_dashboard_b.q -symbol BTCUSDT -pollms 150 -fillprob 0.35 -window 240
+
 # Help
 .PHONY: help
 help:
@@ -315,4 +357,11 @@ help:
 	@echo "  coverage         - Run code coverage analysis"
 	@echo "  docs             - Generate documentation"
 	@echo "  install-deps     - Install simulation dependencies"
+	@echo "  binance-capture  - Capture Binance WebSocket snapshots"
+	@echo "  binance-to-input - Convert capture to market_input.txt"
+	@echo "  binance-refresh-input - Capture and convert in one command"
+	@echo "  live-trading-dashboard - Open live Binance trading visualization"
+	@echo "  live-hjb-dashboard - Live Binance trading visualization with HDL HJB backend"
+	@echo "  live-trading-dashboard-b - Open kdb/q+ dashboard version"
+	@echo "  replay-trading-dashboard - Replay captured data in the visualization"
 	@echo "  help             - Show this help"

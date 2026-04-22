@@ -316,6 +316,130 @@ docker run -it --rm -v $(pwd):/workspace fpga-sim bash
 docker run --rm -v $(pwd):/workspace fpga-sim make all
 ```
 
+## Binance WebSocket Data Pipeline
+
+You can ingest live Binance market data, store it as NDJSON, and convert it into
+`market_input.txt` for `hjb_calculator_tb.v`.
+
+### 1. Install Python dependencies
+
+```bash
+pip3 install -r requirements.txt
+```
+
+### 2. Capture live Binance snapshots
+
+```bash
+python3 scripts/capture_binance_ws.py \
+   --symbol btcusdt \
+   --stream bookticker \
+   --output data/binance_capture.ndjson \
+   --max-messages 500
+```
+
+### 3. Convert capture to HJB testbench input
+
+```bash
+python3 scripts/binance_to_market_input.py \
+   --input data/binance_capture.ndjson \
+   --output market_input.txt \
+   --inventory 0
+```
+
+The output format is a single CSV line:
+
+```text
+mid_price,inventory,volatility
+```
+
+### 4. Run HJB simulation using generated input
+
+```bash
+make iverilog-hjb
+```
+
+### Makefile shortcuts
+
+```bash
+make binance-capture
+make binance-to-input
+make binance-refresh-input
+```
+
+## Live Trading Visualization
+
+For a rolling view of Binance market data plus either a synthetic strategy or the HDL-backed HJB backend, use the live dashboard.
+
+### Live Binance feed
+
+```bash
+python3 scripts/live_trading_dashboard.py \
+   --mode live \
+   --symbol btcusdt \
+   --stream bookticker
+```
+
+### HDL-backed HJB backend
+
+This mode feeds live Binance ticks into the actual HJB HDL simulator, then shows:
+
+1. Source lag from Binance to local receipt.
+2. HJB compute lag from HDL start to HDL completion.
+3. Dashboard lag from receipt to visualization.
+4. HJB quote lines and execution markers.
+
+```bash
+python3 scripts/live_trading_dashboard.py \
+   --mode live \
+   --backend hjb \
+   --symbol btcusdt \
+   --stream bookticker
+```
+
+### Replay captured data
+
+```bash
+python3 scripts/live_trading_dashboard.py \
+   --mode replay \
+   --input data/binance_capture.ndjson
+```
+
+### Makefile shortcuts
+
+```bash
+make live-trading-dashboard
+make replay-trading-dashboard
+make live-hjb-dashboard
+```
+
+## Dashboard Version B (kdb/q+)
+
+An alternative dashboard is available in q:
+
+```bash
+q scripts/live_trading_dashboard_b.q -symbol BTCUSDT -pollms 150 -fillprob 0.35 -window 240
+```
+
+Or via Make:
+
+```bash
+make live-trading-dashboard-b
+```
+
+Notes for Version B:
+
+1. Feed is real (Binance REST polling).
+2. HJB compute is q-side approximation (simulated), not RTL.
+3. Fill generation is simulated probabilistic model.
+4. It can optionally log events with `-log path/to/events.jsonl`.
+
+The dashboard shows:
+
+1. Mid, bid, and ask price traces.
+2. HJB quote lines and execution markers.
+3. Rolling source lag, HJB compute lag, execution latency, and end-to-end lag.
+4. Basic live stats such as tick count, quote latency cycles, and idle time.
+
 ## 🔧 Troubleshooting
 
 ### Common Issues

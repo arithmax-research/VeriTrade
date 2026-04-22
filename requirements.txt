@@ -27,3 +27,6 @@ ipython>=7.0.0
 # Optional: Advanced analysis
 scipy>=1.7.0
 seaborn>=0.11.0
+
+# Market data ingestion
+websocket-client>=1.8.0
