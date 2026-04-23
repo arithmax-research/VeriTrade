@@ -32,6 +32,7 @@ IVERILOG = iverilog
 VVP = vvp
 GTKWAVE = gtkwave
 VERILATOR = verilator
+Q_BIN ?= q
 
 # Compilation flags
 IVERILOG_FLAGS = -g2012 -Wall -Winfloop
@@ -323,7 +324,15 @@ live-hjb-dashboard:
 .PHONY: live-trading-dashboard-b
 live-trading-dashboard-b:
 	@echo "Launching kdb/q+ dashboard (Version B)..."
-	q scripts/live_trading_dashboard_b.q -symbol BTCUSDT -pollms 150 -fillprob 0.35 -window 240
+	@if command -v $(Q_BIN) >/dev/null 2>&1; then \
+		$(Q_BIN) scripts/live_trading_dashboard_b.q -symbol BTCUSDT -pollms 150 -fillprob 0.35 -window 240; \
+	else \
+		echo "Error: kdb+/q executable not found in PATH (expected: '$(Q_BIN)')."; \
+		echo "Install kdb+ Community Edition from https://kx.com/connect-with-us/download/"; \
+		echo "Or run with an explicit binary: make live-trading-dashboard-b Q_BIN=/path/to/q"; \
+		echo "Alternative dashboard: make live-trading-dashboard"; \
+		exit 127; \
+	fi
 
 # Help
 .PHONY: help
