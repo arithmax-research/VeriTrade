@@ -1,4 +1,5 @@
 {
     "kdb.targetMap": {},
-    "kdb.connectionMap": {}
+    "kdb.connectionMap": {},
+    "cmake.sourceDirectory": "/home/misango/codechest/VeriTrade/dashboards"
 }
