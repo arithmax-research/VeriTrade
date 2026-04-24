@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Sub-microsecond latency • Single-strategy selection • Four GPU-accelerated visualization frontends • Optiver-equivalent compliance**
+**Sub-microsecond latency • Single-strategy selection • Four GPU-accelerated visualization frontends **
 
 [![Documentation](https://img.shields.io/badge/docs-institutional-blue.svg)](INSTITUTIONAL_ARCHITECTURE.md)
 [![Deployment](https://img.shields.io/badge/deploy-docker%20%7C%20k8s-green.svg)](DEPLOYMENT_GUIDE.md)
