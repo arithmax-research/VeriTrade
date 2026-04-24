@@ -462,6 +462,43 @@ live-verilog-maker-dashboard:
 	@echo "Launching live dashboard with Verilog quote core + maker lifecycle backend..."
 	python3 scripts/live_trading_dashboard.py --mode live --backend maker --symbol btcusdt --stream depth --depth-update-ms 100 --enable-taker-hedge --maker-use-verilog-quoter
 
+# New support module targets
+.PHONY: iverilog-risk-manager
+iverilog-risk-manager: $(SIM_DIR)
+	@echo "Running Risk Manager simulation..."
+	$(IVERILOG) $(IVERILOG_FLAGS) -o $(SIM_DIR)/risk_manager_tb \
+		$(RTL_DIR)/risk_manager.v $(TB_DIR)/risk_manager_tb.v
+	cd $(SIM_DIR) && $(VVP) risk_manager_tb
+	@echo "Risk Manager simulation completed"
+
+.PHONY: iverilog-pnl-tracker
+iverilog-pnl-tracker: $(SIM_DIR)
+	@echo "Running PnL Tracker simulation..."
+	$(IVERILOG) $(IVERILOG_FLAGS) -o $(SIM_DIR)/pnl_tracker_tb \
+		$(RTL_DIR)/pnl_tracker.v $(TB_DIR)/pnl_tracker_tb.v
+	cd $(SIM_DIR) && $(VVP) pnl_tracker_tb
+	@echo "PnL Tracker simulation completed"
+
+.PHONY: iverilog-order-book
+iverilog-order-book: $(SIM_DIR)
+	@echo "Running Order Book simulation..."
+	$(IVERILOG) $(IVERILOG_FLAGS) -o $(SIM_DIR)/order_book_tb \
+		$(RTL_DIR)/order_book.v $(TB_DIR)/order_book_tb.v
+	cd $(SIM_DIR) && $(VVP) order_book_tb
+	@echo "Order Book simulation completed"
+
+.PHONY: iverilog-latency-monitor
+iverilog-latency-monitor: $(SIM_DIR)
+	@echo "Running Latency Monitor simulation..."
+	$(IVERILOG) $(IVERILOG_FLAGS) -o $(SIM_DIR)/latency_monitor_tb \
+		$(RTL_DIR)/latency_monitor.v $(TB_DIR)/latency_monitor_tb.v
+	cd $(SIM_DIR) && $(VVP) latency_monitor_tb
+	@echo "Latency Monitor simulation completed"
+
+.PHONY: iverilog-support-modules
+iverilog-support-modules: iverilog-risk-manager iverilog-pnl-tracker iverilog-order-book iverilog-latency-monitor
+	@echo "All support module simulations completed"
+
 .PHONY: iverilog-maker-quoter
 iverilog-maker-quoter: $(SIM_DIR)
 	@echo "Running Verilog market-maker quote simulation..."
