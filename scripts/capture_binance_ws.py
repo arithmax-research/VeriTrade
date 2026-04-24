@@ -12,6 +12,8 @@ from typing import Any, Dict
 
 from websocket import WebSocketApp
 
+from binance_order_book import build_stream_url
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -44,12 +46,7 @@ class CaptureState:
 
 
 def build_stream(symbol: str, stream: str) -> str:
-    symbol_l = symbol.lower()
-    if stream == "bookticker":
-        return f"wss://stream.binance.com:9443/ws/{symbol_l}@bookTicker"
-    if stream == "trade":
-        return f"wss://stream.binance.com:9443/ws/{symbol_l}@trade"
-    raise ValueError(f"Unsupported stream: {stream}")
+    return build_stream_url(symbol, stream)
 
 
 def main() -> int:
@@ -57,7 +54,7 @@ def main() -> int:
     parser.add_argument("--symbol", default="btcusdt", help="Binance symbol, e.g. btcusdt")
     parser.add_argument(
         "--stream",
-        choices=["bookticker", "trade"],
+        choices=["bookticker", "trade", "depth", "depth20"],
         default="bookticker",
         help="Stream type to capture",
     )

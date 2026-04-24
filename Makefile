@@ -321,6 +321,33 @@ live-hjb-dashboard:
 	@echo "Launching live dashboard with HDL HJB backend..."
 	python3 scripts/live_trading_dashboard.py --mode live --backend hjb --symbol btcusdt --stream bookticker
 
+.PHONY: live-maker-dashboard
+live-maker-dashboard:
+	@echo "Launching live dashboard with market-maker simulation backend..."
+	python3 scripts/live_trading_dashboard.py --mode live --backend maker --symbol btcusdt --stream depth --depth-update-ms 100 --enable-taker-hedge
+
+.PHONY: live-verilog-maker-dashboard
+live-verilog-maker-dashboard:
+	@echo "Launching live dashboard with Verilog quote core + maker lifecycle backend..."
+	python3 scripts/live_trading_dashboard.py --mode live --backend maker --symbol btcusdt --stream depth --depth-update-ms 100 --enable-taker-hedge --maker-use-verilog-quoter
+
+.PHONY: iverilog-maker-quoter
+iverilog-maker-quoter: $(SIM_DIR)
+	@echo "Running Verilog market-maker quote simulation..."
+	iverilog -g2012 -Wall -Winfloop -o $(SIM_DIR)/verilog_market_maker_tb \
+		rtl/verilog_market_maker.v testbench/verilog_market_maker_tb.v
+	@echo "10000000,9999950,10000050,0,30,1200,1300" > market_input_verilog.txt
+	vvp $(SIM_DIR)/verilog_market_maker_tb
+	@echo "Verilog output:" && cat strategy_verilog_output.txt
+
+.PHONY: clean-verilog-maker
+clean-verilog-maker:
+	@echo "Cleaning Verilog maker artifacts..."
+	rm -f $(SIM_DIR)/verilog_market_maker_tb
+	rm -f market_input_verilog.txt
+	rm -f strategy_verilog_output.txt
+	@echo "Verilog maker cleanup completed"
+
 .PHONY: live-trading-dashboard-b
 live-trading-dashboard-b:
 	@echo "Launching kdb/q+ dashboard (Version B)..."
@@ -371,6 +398,10 @@ help:
 	@echo "  binance-refresh-input - Capture and convert in one command"
 	@echo "  live-trading-dashboard - Open live Binance trading visualization"
 	@echo "  live-hjb-dashboard - Live Binance trading visualization with HDL HJB backend"
+	@echo "  live-maker-dashboard - Live Binance depth feed with lifecycle/queue/fill maker simulator"
+	@echo "  live-verilog-maker-dashboard - Live maker simulator with Verilog quote core"
+	@echo "  iverilog-maker-quoter - Build/run Verilog quote core smoke test"
+	@echo "  clean-verilog-maker - Remove Verilog maker generated files"
 	@echo "  live-trading-dashboard-b - Open kdb/q+ dashboard version"
 	@echo "  replay-trading-dashboard - Replay captured data in the visualization"
 	@echo "  help             - Show this help"

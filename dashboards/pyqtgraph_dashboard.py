@@ -22,8 +22,7 @@ import threading
 import time
 
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtGui, QtCore
-import numpy as np
+from pyqtgraph.Qt import QtCore, QtWidgets
 
 # Configuration
 MAX_HISTORY = 10000  # Keep 10k ticks in memory
@@ -64,11 +63,11 @@ class TickBuffer:
         with self.lock:
             return list(self.buffer)[-n:]
 
-class RTDashboard(pg.GraphicsWindow):
+class RTDashboard(pg.GraphicsLayoutWidget):
     """Real-time trading dashboard using PyQtGraph"""
     
     def __init__(self, title="VeriTrade FPGA Dashboard", parent=None):
-        super().__init__(title=title)
+        super().__init__(parent=parent)
         self.setWindowTitle(title)
         self.setGeometry(100, 100, 1600, 900)
         
@@ -201,9 +200,9 @@ def demo_data_generator(dashboard: RTDashboard):
         time.sleep(0.01)  # 100Hz data feed
 
 if __name__ == '__main__':
-    app = QtGui.QApplication.instance()
+    app = QtWidgets.QApplication.instance()
     if app is None:
-        app = QtGui.QApplication(sys.argv)
+        app = QtWidgets.QApplication(sys.argv)
     
     dashboard = RTDashboard("VeriTrade FPGA Dashboard")
     dashboard.show()

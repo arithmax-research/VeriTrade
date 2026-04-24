@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from binance_order_book import LocalOrderBook, top_of_book_from_payload
+
 
 def to_float(value: Any) -> Optional[float]:
     try:
@@ -28,6 +30,13 @@ def extract_mid(payload: Dict[str, Any], stream: str) -> Optional[float]:
         if trade_price is None or trade_price <= 0:
             return None
         return trade_price
+
+    if stream == "depth20":
+        top = top_of_book_from_payload(payload)
+        if top is None:
+            return None
+        bid, _, ask, _ = top
+        return (bid + ask) / 2.0
 
     return None
 
@@ -86,6 +95,9 @@ def main() -> int:
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     mids: List[float] = []
+    depth_symbol: Optional[str] = None
+    depth_book: Optional[LocalOrderBook] = None
+    depth_ready = False
     with input_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -101,7 +113,40 @@ def main() -> int:
             if not isinstance(payload, dict):
                 continue
 
+            if depth_symbol is None:
+                depth_symbol = str(row.get("symbol", "BTCUSDT") or "BTCUSDT").upper()
+                depth_book = LocalOrderBook(symbol=depth_symbol)
+
             mid = extract_mid(payload=payload, stream=stream)
+            if mid is None and stream == "depth":
+                if not depth_ready:
+                    try:
+                        from binance_order_book import fetch_depth_snapshot
+
+                        if depth_book is None:
+                            continue
+                        depth_book.apply_snapshot(fetch_depth_snapshot(symbol=depth_symbol or "BTCUSDT"))
+                        depth_ready = True
+                    except Exception:
+                        continue
+                if depth_book is not None and depth_book.apply_delta(payload):
+                    top = depth_book.top_of_book()
+                    if top is not None:
+                        bid, _, ask, _ = top
+                        mid = (bid + ask) / 2.0
+                elif depth_book is not None:
+                    try:
+                        from binance_order_book import fetch_depth_snapshot
+
+                        depth_book.apply_snapshot(fetch_depth_snapshot(symbol=depth_symbol or "BTCUSDT"))
+                        if depth_book.apply_delta(payload):
+                            top = depth_book.top_of_book()
+                            if top is not None:
+                                bid, _, ask, _ = top
+                                mid = (bid + ask) / 2.0
+                    except Exception:
+                        continue
+
             if mid is not None and mid > 0:
                 mids.append(mid)
 
