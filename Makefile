@@ -82,6 +82,17 @@ iverilog-hjb: $(SIM_DIR)
 	cd $(SIM_DIR) && $(VVP) hjb_calculator_tb
 	@echo "HJB Calculator simulation completed"
 
+.PHONY: iverilog-maker
+iverilog-maker: $(SIM_DIR)
+	@echo "Running HJB market-maker simulation..."
+	$(IVERILOG) $(IVERILOG_FLAGS) -o $(SIM_DIR)/verilog_market_maker_tb \
+		$(RTL_DIR)/verilog_market_maker.v \
+		$(RTL_DIR)/hjb_toxicity_tracker.v \
+		$(RTL_DIR)/hjb_jump_operator.v \
+		$(TB_DIR)/verilog_market_maker_tb.v
+	cd $(SIM_DIR) && $(VVP) verilog_market_maker_tb
+	@echo "HJB market-maker simulation completed"
+
 .PHONY: iverilog-integration
 iverilog-integration: $(SIM_DIR)
 	@echo "Running Icarus Verilog integration simulation..."
@@ -254,10 +265,130 @@ docs:
 	@echo "" >> SIMULATION_GUIDE.md
 	@echo "Documentation generated in SIMULATION_GUIDE.md"
 
+# CUDA HJB Solver targets
+.PHONY: cuda-hjb
+cuda-hjb: cuda-hjb-build cuda-hjb-test
+
+.PHONY: cuda-hjb-build
+cuda-hjb-build:
+	@echo "Building CUDA HJB solver..."
+	@if command -v nvcc >/dev/null 2>&1; then \
+		cd backends && \
+		nvcc -O3 -arch=sm_70 -std=c++11 \
+			hjb_solver.cu -c -o hjb_solver.o && \
+		g++ -O3 -std=c++11 hjb_test.cpp hjb_solver.o \
+			-I/usr/local/cuda/include \
+			-L/usr/local/cuda/lib64 -lcudart \
+			-o hjb_test_exe && \
+		echo "[CUDA] Build successful: backends/hjb_test_exe"; \
+	else \
+		echo "Error: CUDA toolkit (nvcc) not found"; \
+		echo "Install CUDA from https://developer.nvidia.com/cuda-toolkit"; \
+		exit 1; \
+	fi
+
+.PHONY: cuda-hjb-test
+cuda-hjb-test: cuda-hjb-build
+	@echo "Running CUDA HJB solver test..."
+	@if [ -f backends/hjb_test_exe ]; then \
+		cd backends && ./hjb_test_exe; \
+	else \
+		echo "Error: hjb_test_exe not found"; \
+		exit 1; \
+	fi
+
+.PHONY: cuda-hjb-clean
+cuda-hjb-clean:
+	@echo "Cleaning CUDA HJB artifacts..."
+	rm -f backends/hjb_test_exe
+	rm -f backends/hjb_jump_validation_exe
+	rm -f backends/hjb_control_test_exe
+	rm -f backends/hjb_solver.o
+	rm -f backends/*.o
+	@echo "CUDA cleanup completed"
+
+.PHONY: cuda-hjb-validate-jump
+cuda-hjb-validate-jump:
+	@echo "Building jump-diffusion validation test..."
+	@if command -v nvcc >/dev/null 2>&1; then \
+		cd backends && \
+		g++ -O3 -std=c++11 hjb_jump_validation.cpp hjb_solver.o \
+			-I/usr/local/cuda/include \
+			-L/usr/local/cuda/lib64 -lcudart \
+			-o hjb_jump_validation_exe && \
+		echo "[CUDA] Jump validation test built: backends/hjb_jump_validation_exe"; \
+		./hjb_jump_validation_exe; \
+	else \
+		echo "Error: CUDA toolkit not found"; \
+		exit 1; \
+	fi
+
+.PHONY: cuda-hjb-validate-control
+cuda-hjb-validate-control:
+	@echo "Building control-space optimization test..."
+	@if command -v nvcc >/dev/null 2>&1; then \
+		cd backends && \
+		g++ -O3 -std=c++11 hjb_control_test.cpp hjb_solver.o \
+			-I/usr/local/cuda/include \
+			-L/usr/local/cuda/lib64 -lcudart \
+			-o hjb_control_test_exe && \
+		echo "[CUDA] Control optimization test built: backends/hjb_control_test_exe"; \
+		./hjb_control_test_exe; \
+	else \
+		echo "Error: CUDA toolkit not found"; \
+		exit 1; \
+	fi
+
+# Python CFFI Bindings (Option 3)
+.PHONY: cuda-cffi-build
+cuda-cffi-build:
+	@echo "Building Python CFFI bindings for HJB solver..."
+	@if command -v nvcc >/dev/null 2>&1; then \
+		cd backends && \
+		nvcc -O3 -arch=sm_70 -std=c++11 -Xcompiler "-fPIC" \
+			hjb_solver.cu -c -o hjb_solver.o && \
+		g++ -O3 -std=c++11 -fPIC -shared \
+			-I/usr/local/cuda/include \
+			hjb_c_interface.cpp hjb_solver.o \
+			-L/usr/local/cuda/lib64 -lcudart \
+			-o libhjb_solver.so && \
+		echo "[CFFI] Built libhjb_solver.so"; \
+		python3 -c "from hjb_cffi import HJBSolver; print('[CFFI] Python module loaded successfully')" && \
+		echo "[CFFI] Build complete!"; \
+	else \
+		echo "Error: CUDA toolkit not found"; \
+		exit 1; \
+	fi
+
+.PHONY: cuda-cffi-test
+cuda-cffi-test: cuda-cffi-build
+	@echo "Testing Python CFFI interface..."
+	@cd backends && python3 -c "from hjb_cffi import HJBSolver; s=HJBSolver(); s.initialize(sigma=0.1, mu=0.0, gamma=0.01, kappa=0.0001, alpha=0.01, lambda_jump=0.5, grid_points_S=64, grid_points_I=32, grid_points_t=256, S_min=95.0, S_max=105.0, I_min=-50.0, I_max=50.0, horizon=0.1); s.solve(); q=s.get_quotes(100.0, 0, 0); print('[CFFI] Test PASSED: Quote at S=100, I=0: bid={:.2f}, ask={:.2f}'.format(q.bid_price, q.ask_price))"
+
+.PHONY: cuda-cffi-demo
+cuda-cffi-demo: cuda-cffi-build
+	@echo "Running CFFI demo: generating quotes for price range..."
+	@cd backends && mkdir -p ../market_input && \
+		echo '{"sigma": 0.1, "mu": 0.0, "gamma": 0.01, "kappa": 0.0001, "alpha": 0.01, "lambda_jump": 0.5, "grid_points_S": 64, "grid_points_I": 32, "grid_points_t": 256, "S_min": 95.0, "S_max": 105.0, "I_min": -50.0, "I_max": 50.0, "horizon": 0.1}' > demo_config.json && \
+		python3 hjb_solver_cli.py demo_config.json -o ../market_input/quotes_cffi_demo.csv -v --S-range 95 105 --I-range -20 20 && \
+		head -10 ../market_input/quotes_cffi_demo.csv && \
+		echo "[CFFI] Demo complete! Quotes written to market_input/quotes_cffi_demo.csv"
+
+.PHONY: cuda-cffi-clean
+cuda-cffi-clean:
+	@echo "Cleaning CFFI artifacts..."
+	rm -f backends/libhjb_solver.so
+	rm -f backends/hjb_c_interface.o
+	rm -f backends/demo_config.json
+	rm -f market_input/quotes_cffi_demo.csv
+	@echo "CFFI cleanup completed"
+
 # Clean up
 .PHONY: clean
-clean:
+clean: cuda-hjb-clean
 	rm -rf $(SIM_DIR)
+	rm -f backends/libhjb_solver.so
+	rm -f backends/hjb_c_interface.o
 	rm -f *.vcd
 	rm -f *.vvp
 	rm -f *.out
@@ -378,6 +509,12 @@ help:
 	@echo "  iverilog-order-manager   - Test order manager"
 	@echo "  iverilog-trading-strategy - Test trading strategy"
 	@echo "  iverilog-integration     - Test full integration"
+	@echo ""
+	@echo "CUDA GPU Solver:"
+	@echo "  cuda-hjb         - Build and test CUDA HJB solver"
+	@echo "  cuda-hjb-build   - Build CUDA HJB solver only"
+	@echo "  cuda-hjb-test    - Run CUDA HJB solver test"
+	@echo "  cuda-hjb-clean   - Clean CUDA artifacts"
 	@echo ""
 	@echo "Waveform viewing:"
 	@echo "  wave             - View market data waveform"

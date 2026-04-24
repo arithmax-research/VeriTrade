@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 /*
  * Trading Strategy Engine
  * Hardware-accelerated trading strategy execution

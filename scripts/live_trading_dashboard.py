@@ -24,6 +24,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any, Callable, Deque, Dict, Iterable, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -814,6 +815,142 @@ class HJBEngine:
             self.quote_id += 1
 
 
+class HJBCFFIEngine:
+    def __init__(
+        self,
+        pump: "EventPump",
+        config_path: Path,
+        inventory: int = 0,
+        time_index: int = 0,
+        fill_model: str = "simulated",
+        fill_probability: float = 0.35,
+    ) -> None:
+        self.pump = pump
+        self.repo_root = _repo_root()
+        self.queue: "queue.Queue[Optional[MarketTick]]" = queue.Queue(maxsize=10_000)
+        self.max_queue_depth = 0
+        self.dropped_ticks = 0
+        self.quote_id = 1
+        self.fill_model = fill_model
+        self.fill_probability = max(0.0, min(fill_probability, 1.0))
+        self.fill_side_toggle = 0
+        self.inventory = inventory
+        self.time_index = max(time_index, 0)
+        self.mid_history: Deque[float] = deque(maxlen=240)
+
+        backend_dir = self.repo_root / "backends"
+        if str(backend_dir) not in sys.path:
+            sys.path.insert(0, str(backend_dir))
+        from hjb_cffi import HJBSolver, SolverParams
+
+        self._solver = HJBSolver()
+        params = SolverParams.from_json(str(config_path))
+        self._solver.initialize(params)
+        self._solver.solve()
+
+        self.worker = threading.Thread(target=self._run, daemon=True)
+        self.worker.start()
+
+    def submit_tick(self, tick: MarketTick) -> None:
+        try:
+            self.queue.put_nowait(tick)
+            self.max_queue_depth = max(self.max_queue_depth, self.queue.qsize())
+        except queue.Full:
+            self.dropped_ticks += 1
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self.queue.put_nowait(tick)
+                self.max_queue_depth = max(self.max_queue_depth, self.queue.qsize())
+            except queue.Full:
+                self.dropped_ticks += 1
+
+    def metrics(self) -> Dict[str, int]:
+        return {
+            "depth": self.queue.qsize(),
+            "dropped": self.dropped_ticks,
+            "max_depth": self.max_queue_depth,
+        }
+
+    def stop(self) -> None:
+        try:
+            self.queue.put_nowait(None)
+        except queue.Full:
+            pass
+
+    def _run(self) -> None:
+        while True:
+            tick = self.queue.get()
+            if tick is None:
+                return
+
+            self.mid_history.append(tick.mid)
+            volatility = _annualized_volatility(self.mid_history)
+            sim_start_ts = time.time()
+            quote = self._solver.get_quotes(tick.mid, self.inventory, self.time_index)
+            sim_end_ts = time.time()
+
+            compute_us = max((sim_end_ts - sim_start_ts) * 1_000_000.0, 0.0)
+            latency_ns = compute_us * 1000.0
+            latency_cycles = int(latency_ns / 4.0)
+
+            quote_event = {
+                "kind": "quote",
+                "quote_id": self.quote_id,
+                "source_ts": tick.source_ts,
+                "recv_ts": tick.recv_ts,
+                "sim_start_ts": sim_start_ts,
+                "sim_end_ts": sim_end_ts,
+                "ts": sim_end_ts,
+                "symbol": tick.symbol,
+                "mid": tick.mid,
+                "bid": quote.bid_price,
+                "ask": quote.ask_price,
+                "latency_cycles": latency_cycles,
+                "latency_ns": latency_ns,
+                "volatility": volatility,
+                "source": "hjb-cffi",
+            }
+            self.pump.put(quote_event)
+
+            fill_side: Optional[str] = None
+            fill_price = 0.0
+            if self.fill_model == "strict":
+                if tick.ask <= quote.bid_price:
+                    fill_side = "BUY"
+                    fill_price = quote.bid_price
+                elif tick.bid >= quote.ask_price:
+                    fill_side = "SELL"
+                    fill_price = quote.ask_price
+            else:
+                if random.random() <= self.fill_probability:
+                    fill_side = "BUY" if self.fill_side_toggle % 2 == 0 else "SELL"
+                    fill_price = tick.ask if fill_side == "BUY" else tick.bid
+                    self.fill_side_toggle += 1
+
+            if fill_side is not None:
+                exec_event = {
+                    "kind": "execution",
+                    "order_id": self.quote_id,
+                    "side": fill_side,
+                    "source_ts": tick.source_ts,
+                    "recv_ts": tick.recv_ts,
+                    "signal_ts": sim_start_ts,
+                    "exec_ts": sim_end_ts,
+                    "ts": sim_end_ts,
+                    "symbol": tick.symbol,
+                    "price": fill_price,
+                    "latency_us": compute_us,
+                    "execution_model": self.fill_model,
+                    "source": "hjb-cffi-fill",
+                }
+                self.pump.put(exec_event)
+
+            self.quote_id += 1
+
+
 class Dashboard:
     def __init__(
         self,
@@ -1447,6 +1584,29 @@ def main() -> int:
         help="Fill probability for HJB simulated fill mode",
     )
     parser.add_argument(
+        "--hjb-engine",
+        choices=["rtl", "cffi"],
+        default="cffi",
+        help="HJB implementation backend",
+    )
+    parser.add_argument(
+        "--hjb-config",
+        default="backends/demo_config.json",
+        help="CFFI HJB solver JSON config path",
+    )
+    parser.add_argument(
+        "--hjb-inventory",
+        type=int,
+        default=0,
+        help="Inventory input for CFFI HJB quote extraction",
+    )
+    parser.add_argument(
+        "--hjb-time-index",
+        type=int,
+        default=0,
+        help="Time index input for CFFI HJB quote extraction",
+    )
+    parser.add_argument(
         "--event-log",
         default="",
         help="Optional JSONL path for event logging",
@@ -1480,11 +1640,24 @@ def main() -> int:
     maker_engine: Optional[MakerSim] = None
     verilog_quoter: Optional[VerilogQuoteEngine] = None
     if args.backend == "hjb":
-        hjb_engine = HJBEngine(
-            pump,
-            fill_model=args.hjb_fill_model,
-            fill_probability=args.hjb_fill_probability,
-        )
+        if args.hjb_engine == "rtl":
+            hjb_engine = HJBEngine(
+                pump,
+                fill_model=args.hjb_fill_model,
+                fill_probability=args.hjb_fill_probability,
+            )
+        else:
+            hjb_config = Path(args.hjb_config)
+            if not hjb_config.is_absolute():
+                hjb_config = _repo_root() / hjb_config
+            hjb_engine = HJBCFFIEngine(
+                pump,
+                config_path=hjb_config,
+                inventory=args.hjb_inventory,
+                time_index=args.hjb_time_index,
+                fill_model=args.hjb_fill_model,
+                fill_probability=args.hjb_fill_probability,
+            )
     elif args.backend == "maker":
         if args.maker_use_verilog_quoter:
             verilog_quoter = VerilogQuoteEngine(
